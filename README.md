@@ -1,14 +1,30 @@
 # doc-ingest
 
-> One pipeline from PDF, HTML and DOCX to clean, metadata-rich chunks for any vector store.
+One pipeline from PDF, HTML and DOCX to clean, metadata-rich chunks for any vector store.
 
-**Status:** 🚧 Early stage — design and roadmap published, implementation in progress. Stars, issues and ideas welcome.
+> **Project status: planning. There is no working code in this repository yet.**
+> This README describes what the project will do. Nothing below can be installed or run today.
+> Features are ticked off in the checklist as they are built.
 
-## Why
+## What it is
 
-The boring 80% of every RAG project is getting clean text, tables and metadata out of messy documents.
+A Python library and command-line tool.
+
+**The problem it solves:** The boring 80% of every RAG project is getting clean text, tables and metadata out of messy documents.
+
+## Who it is for
+
+Anyone feeding PDFs, web pages or Word files into a search index or vector database.
+
+## How it will work
+
+1. You point the tool at a folder of documents.
+2. It extracts text (using OCR for scanned pages), keeps tables and headings, and splits the result into chunks along section boundaries.
+3. It writes the chunks with their source file, page and section so every answer can be traced back.
 
 ## Planned features
+
+Unticked items are not built yet.
 
 - [ ] PDF, HTML, DOCX, Markdown inputs
 - [ ] OCR fallback for scanned pages
@@ -17,24 +33,17 @@ The boring 80% of every RAG project is getting clean text, tables and metadata o
 - [ ] Source provenance metadata (file, page, section)
 - [ ] Exporters for common vector stores and JSONL
 
-## Intended usage
+## Planned usage
 
-```
+This is the intended interface, shown so you can judge the design. **It does not work yet**, and names may change before the first release.
+
+```bash
 doc-ingest ./corpus --out chunks.jsonl --chunk-size 800
 ```
 
-_The interface above is the target design and may change._
-
-## Roadmap
-
-1. Core implementation of the first feature set
-2. Examples and tests
-3. CI and first tagged release
-4. Docs and integrations
-
 ## Contributing
 
-Contributions are welcome. Open an issue to discuss an idea or pick an unchecked item from the feature list.
+Feedback on the design is the most useful contribution right now. Open an issue to suggest a feature, question an approach or describe your use case. Code contributions are welcome once the first version lands.
 
 ## License
 
