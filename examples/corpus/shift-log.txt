@@ -1,0 +1,7 @@
+Shift log, north depot, Tuesday.
+
+Rover 7 returned at 09:40 with code E12 after the hill route. Left it to cool for ten minutes and it completed the next two runs without trouble.
+
+Rover 3 would not leave the depot because the battery showed 74%. Put it back on the charger and swapped in rover 5 for the morning deliveries.
+
+Nothing else to report. Handover to the evening shift at 16:00.

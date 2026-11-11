@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Rover firmware 4.2 release notes</title>
+  <style>body { font-family: sans-serif; }</style>
+  <script>window.analytics = [];</script>
+</head>
+<body>
+  <nav><a href="/">Home</a> | <a href="/firmware">Firmware</a></nav>
+  <main>
+    <h1>Rover firmware 4.2</h1>
+    <p>Firmware 4.2 is a maintenance release for the L2 rover. Install it from the depot console; the update takes about <strong>12 minutes</strong> and the rover restarts twice.</p>
+    <h2>What changed</h2>
+    <ul>
+      <li>Kerb detection now works in heavy rain.</li>
+      <li>The rover slows to walking pace within 3 metres of a pedestrian.</li>
+      <li>Fixed a fault where code E27 was raised by morning dew.</li>
+    </ul>
+    <h2>Compatibility</h2>
+    <table>
+      <tr><th>Hardware revision</th><th>Supported</th><th>Notes</th></tr>
+      <tr><td>L2 rev A</td><td>Yes</td><td>Needs bootloader 1.9 or newer</td></tr>
+      <tr><td>L2 rev B</td><td>Yes</td><td></td></tr>
+      <tr><td>L1</td><td>No</td><td>Stay on firmware 3.x</td></tr>
+    </table>
+    <h2>Rolling back</h2>
+    <p>If a rover misbehaves after the update, roll back from the console:</p>
+    <pre>rover-ctl firmware rollback
+rover-ctl firmware status</pre>
+    <p>Rollback keeps maps &amp; delivery history.</p>
+  </main>
+  <footer>Larkspur Robotics is a fictional company used for example data.</footer>
+</body>
+</html>
