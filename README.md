@@ -2,7 +2,7 @@
 
 One command from a folder of text, Markdown, HTML, DOCX and PDF files to clean, section-aware chunks in JSONL, each tagged with the file, heading path and page it came from.
 
-**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. Not built yet: OCR for scanned pages, table detection inside PDFs, and exporters that write straight to a vector store.
+**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra, and `--ocr` reads scanned PDF pages through the `tesseract` program. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. Not built yet: table and heading detection inside PDFs, and exporters that write straight to a vector store.
 
 ## Install
 
@@ -65,7 +65,7 @@ The HTML table in `release-notes.html` comes out as Markdown too, under the sect
 ## Usage
 
 ```text
-doc-ingest PATH [PATH ...] [--out FILE] [--chunk-size N] [--prepend-section] [--quiet]
+doc-ingest PATH [PATH ...] [--out FILE] [--chunk-size N] [--prepend-section] [--ocr] [--ocr-lang LANG] [--quiet]
 ```
 
 | Option | Default | Effect |
@@ -74,9 +74,13 @@ doc-ingest PATH [PATH ...] [--out FILE] [--chunk-size N] [--prepend-section] [--
 | `--out FILE` | stdout | Where to write JSONL. With stdout, the summary goes to stderr so the output can be piped |
 | `--chunk-size N` | 800 | Maximum characters per chunk |
 | `--prepend-section` | off | Start each chunk's text with its heading path, which helps keyword and embedding search on short chunks |
+| `--ocr` | off | Run OCR on PDF pages that have no text layer (needs `tesseract`, see below) |
+| `--ocr-lang LANG` | `eng` | Tesseract language code(s) for `--ocr`, such as `deu` or `eng+fra` |
 | `--quiet` | off | No summary |
 
-Exit code is 0 on success, 1 if any file could not be read (the rest are still written, and each failure is listed on stderr), 2 for a bad argument.
+Exit code is 0 on success, 1 if any file could not be read (the rest are still written, and each failure is listed on stderr), 2 for a bad argument or for `--ocr` when `tesseract` is not installed.
+
+PDF pages that yield no text are listed on stderr (`no text found on pages of: scan.pdf (pages 1-3)`), with a hint to use `--ocr` when it was not given.
 
 ### What each format gives you
 
@@ -86,9 +90,39 @@ Exit code is 0 on success, 1 if any file could not be read (the rest are still w
 | Markdown | `.md`, `.markdown` | nothing | `#` and underlined | pipe tables kept as written | no |
 | HTML | `.html`, `.htm` | nothing | `h1` to `h6` | converted to Markdown | no |
 | Word | `.docx` | nothing | Heading 1 to 6 and Title styles | converted to Markdown | no |
-| PDF | `.pdf` | `pypdf` extra | no | no | yes |
+| PDF | `.pdf` | `pypdf` extra (`tesseract` for `--ocr`) | no | no | yes |
 
 HTML extraction drops `script`, `style`, `nav`, `footer`, `aside`, `form` and similar page chrome. Markdown front matter is removed and its `title` is used. Fenced code and `<pre>` blocks are kept intact as fenced code.
+
+### Scanned PDFs (OCR)
+
+A scanned page has no text layer, so normal extraction gives nothing. With `--ocr`, each such page's images are passed to [Tesseract](https://github.com/tesseract-ocr/tesseract) and the recognised text is chunked like any other page, keeping its page number. Pages that already have text are never OCRed.
+
+Install the program first (it is not a Python package): `brew install tesseract` on macOS, `apt install tesseract-ocr` on Debian or Ubuntu. Extra languages come as separate packages, such as `tesseract-ocr-deu`.
+
+```bash
+doc-ingest scanned-checklist.pdf --out chunks.jsonl --ocr
+```
+
+```text
+files read:    1 (1 pdf)
+chunks:        1
+pages OCRed:   2
+chunk chars:   min 172, mean 172, max 172
+written to:    chunks.jsonl
+```
+
+Image encodings read: JPEG, JPEG 2000 and CCITT fax (passed to Tesseract as they are), plus uncompressed or Flate, LZW or run-length compressed greyscale and RGB images (wrapped as PNG with the standard library). JBIG2, indexed-colour and CMYK images are skipped, so a page made only of those stays empty and is listed on stderr. OCR quality is whatever Tesseract gives for the scan; nothing is deskewed or cleaned up first.
+
+From Python, pass any callable that takes `(image_bytes, suffix)` and returns text, which is also how the tests run without Tesseract:
+
+```python
+from doc_ingest import load_document
+from doc_ingest.ocr import TesseractOcr
+
+doc = load_document("scanned-checklist.pdf", ocr=TesseractOcr(lang="eng"))
+print(doc.ocr_pages)  # [1, 2]
+```
 
 ### How chunking works
 
@@ -137,14 +171,14 @@ Larkspur Field Handbook > Resetting the controller | 157
 - [x] Structure-aware chunking (headings, sections, tables and code kept intact)
 - [x] Source provenance metadata (file, section, page)
 - [x] JSONL export
-- [ ] OCR fallback for scanned pages
+- [x] OCR fallback for scanned PDF pages (`--ocr`, uses the `tesseract` program)
 - [ ] Table and heading detection in PDFs
 - [ ] Exporters for common vector stores
 - [ ] Chunk overlap and token-based (rather than character-based) sizes
 
 ## Limitations
 
-- Scanned PDFs produce no text: there is no OCR. PDF text comes out as paragraphs in the order `pypdf` reports them, with no headings or tables, so multi-column layouts may interleave.
+- Scanned PDFs produce no text unless you pass `--ocr` and have `tesseract` installed; OCR only covers the image encodings listed above, and OCR output is not marked as such per chunk (the summary counts OCRed pages). Images embedded in DOCX and HTML are not OCRed. PDF text comes out as paragraphs in the order `pypdf` reports them, with no headings or tables, so multi-column layouts may interleave.
 - Chunk size is counted in characters, not model tokens, and there is no overlap between chunks.
 - DOCX reading covers the main document body: headings, paragraphs, numbered or bulleted paragraphs and top-level tables. Headers, footers, footnotes, text boxes, images and tracked-change markup are ignored, and merged table cells are flattened.
 - HTML is read as static markup; anything a page renders with JavaScript is not there. Nested tables are flattened into the outer table.

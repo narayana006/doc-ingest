@@ -95,3 +95,50 @@ def build_pdf(path: Path, pages: list[list[str]]) -> None:
         out += b"%010d 00000 n \n" % offset
     out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
     path.write_bytes(bytes(out))
+
+
+def build_scan_pdf(path: Path, images: list[dict | None]) -> None:
+    """Write a PDF with one image per page and no text layer, like a scanner does.
+
+    Each item is a dict with width, height, data and optionally colorspace
+    (default /DeviceGray), bits (default 8) and filter (default /FlateDecode,
+    which compresses ``data`` here; /DCTDecode stores ``data`` as given).
+    ``None`` makes a blank page with no image.
+    """
+    import zlib
+
+    objects: list[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>", b""]
+    kids = []
+    for image in images:
+        page_id = len(objects) + 1
+        kids.append(f"{page_id} 0 R")
+        if image is None:
+            objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>")
+            continue
+        content_id, image_id = page_id + 1, page_id + 2
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_id} 0 R "
+            f"/Resources << /XObject << /Im0 {image_id} 0 R >> >> >>".encode()
+        )
+        draw = b"q 612 0 0 792 0 0 cm /Im0 Do Q"
+        objects.append(b"<< /Length %d >>\nstream\n" % len(draw) + draw + b"\nendstream")
+        flt = image.get("filter", "/FlateDecode")
+        data = zlib.compress(image["data"]) if flt == "/FlateDecode" else image["data"]
+        head = (
+            f"<< /Type /XObject /Subtype /Image /Width {image['width']} /Height {image['height']} "
+            f"/ColorSpace {image.get('colorspace', '/DeviceGray')} /BitsPerComponent {image.get('bits', 8)} "
+            f"/Filter {flt} /Length {len(data)} >>"
+        ).encode()
+        objects.append(head + b"\nstream\n" + data + b"\nendstream")
+    objects[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode()
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n" % (len(objects) + 1) + b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    path.write_bytes(bytes(out))

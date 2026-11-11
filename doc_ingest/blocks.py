@@ -19,6 +19,8 @@ class Document:
     format: str
     title: str | None = None
     blocks: list[Block] = field(default_factory=list)
+    ocr_pages: list[int] = field(default_factory=list)  # PDF pages whose text came from OCR
+    empty_pages: list[int] = field(default_factory=list)  # PDF pages that gave no text at all
 
 
 def markdown_table(rows: list[list[str]]) -> str:

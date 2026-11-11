@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 from .blocks import Block, Document, markdown_table
 from .html_loader import parse_html
+from .ocr import OcrEngine, page_images
 
 
 class MissingDependency(RuntimeError):
@@ -173,18 +174,33 @@ def load_docx(path: Path) -> Document:
     return Document(source=str(path), format="docx", title=title, blocks=blocks)
 
 
-def load_pdf(path: Path) -> Document:
-    """Extract text page by page with pypdf (optional dependency). No OCR."""
+def load_pdf(path: Path, ocr: OcrEngine | None = None) -> Document:
+    """Extract text page by page with pypdf (optional dependency).
+
+    With an ``ocr`` engine, a page that has no text layer is read by
+    running OCR over the images on it instead.
+    """
     try:
         from pypdf import PdfReader
     except ImportError as exc:
         raise MissingDependency("PDF support needs pypdf: pip install 'doc-ingest[pdf] @ git+https://github.com/narayana006/doc-ingest'") from exc
     reader = PdfReader(str(path))
     blocks: list[Block] = []
+    ocr_pages: list[int] = []
+    empty_pages: list[int] = []
     for number, page in enumerate(reader.pages, start=1):
-        blocks.extend(_paragraphs(page.extract_text() or "", page=number))
+        text = page.extract_text() or ""
+        if not text.strip() and ocr is not None:
+            text = "\n\n".join(ocr(data, suffix) for data, suffix in page_images(page))
+            if text.strip():
+                ocr_pages.append(number)
+        if not text.strip():
+            empty_pages.append(number)
+        blocks.extend(_paragraphs(text, page=number))
     meta_title = getattr(reader.metadata, "title", None) if reader.metadata else None
-    return Document(source=str(path), format="pdf", title=meta_title or None, blocks=blocks)
+    return Document(
+        source=str(path), format="pdf", title=meta_title or None, blocks=blocks, ocr_pages=ocr_pages, empty_pages=empty_pages
+    )
 
 
 LOADERS = {
@@ -200,9 +216,12 @@ LOADERS = {
 SUPPORTED_SUFFIXES = tuple(LOADERS)
 
 
-def load_document(path: str | Path) -> Document:
+def load_document(path: str | Path, ocr: OcrEngine | None = None) -> Document:
+    """Load one file. ``ocr`` is only used for PDF pages with no text layer."""
     path = Path(path)
     loader = LOADERS.get(path.suffix.lower())
     if loader is None:
         raise ValueError(f"unsupported file type: {path.suffix or path.name}")
+    if ocr is not None and loader is LOADERS[".pdf"]:
+        return loader(path, ocr=ocr)
     return loader(path)
