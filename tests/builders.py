@@ -63,8 +63,11 @@ def build_docx(path: Path, items: list[tuple], title: str | None = None) -> None
             )
 
 
-def build_pdf(path: Path, pages: list[list[str]]) -> None:
-    """Write a minimal text PDF: one list of lines per page, Helvetica 12pt."""
+def build_pdf(path: Path, pages: list[list[str] | list[tuple[str, int]]]) -> None:
+    """Write a minimal text PDF: one list of lines per page, Helvetica.
+
+    A line is a string (12pt) or a ``(text, size)`` pair.
+    """
     objects: list[bytes] = []
     n_pages = len(pages)
     font_id = 3 + 2 * n_pages
@@ -72,8 +75,10 @@ def build_pdf(path: Path, pages: list[list[str]]) -> None:
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     for i, lines in enumerate(pages):
-        ops = ["BT", "/F1 12 Tf", "72 720 Td", "16 TL"]
+        ops = ["BT", "72 720 Td", "16 TL"]
         for line in lines:
+            line, size = line if isinstance(line, tuple) else (line, 12)
+            ops.append(f"/F1 {size} Tf")
             safe = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
             ops.append(f"({safe}) Tj T*")
         ops.append("ET")

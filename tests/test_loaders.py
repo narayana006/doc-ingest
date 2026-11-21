@@ -1,6 +1,7 @@
 import pytest
 
 from builders import build_docx, build_pdf
+from doc_ingest.chunker import chunk_document
 from doc_ingest.html_loader import parse_html
 from doc_ingest.loaders import load_document, parse_markdown
 
@@ -109,3 +110,53 @@ def test_pdf_pages_are_recorded(tmp_path):
     assert [b.page for b in doc.blocks] == [1, 2]
     assert "Page one says hello." in doc.blocks[0].text and "(with parens)" in doc.blocks[0].text
     assert doc.blocks[1].text == "Page two is here."
+
+
+def _heading_pdf(tmp_path):
+    path = tmp_path / "h.pdf"
+    build_pdf(
+        path,
+        [
+            [
+                ("Rover Manual", 24),
+                ("Daily checks", 16),
+                ("Inspect the wheels before every shift and wipe the lidar dome clean.", 12),
+                ("Battery", 14),
+                ("Charge to full overnight.", 12),
+            ],
+            [("Fault codes", 16), ("Codes are shown on the display.", 12)],
+        ],
+    )
+    return path
+
+
+def test_pdf_headings_found_by_font_size(tmp_path):
+    pytest.importorskip("pypdf")
+    doc = load_document(_heading_pdf(tmp_path))
+    kinds = [(b.kind, b.level, b.text, b.page) for b in doc.blocks]
+    assert kinds == [
+        ("heading", 1, "Rover Manual", 1),
+        ("heading", 2, "Daily checks", 1),
+        ("paragraph", 0, "Inspect the wheels before every shift and wipe the lidar dome clean.", 1),
+        ("heading", 3, "Battery", 1),
+        ("paragraph", 0, "Charge to full overnight.", 1),
+        ("heading", 2, "Fault codes", 2),
+        ("paragraph", 0, "Codes are shown on the display.", 2),
+    ]
+    assert doc.title == "Rover Manual"
+
+
+def test_pdf_headings_drive_chunk_sections(tmp_path):
+    pytest.importorskip("pypdf")
+    doc = load_document(_heading_pdf(tmp_path))
+    sections = [c.section for c in chunk_document(doc, chunk_size=400)]
+    assert "Rover Manual > Daily checks > Battery" in sections
+    assert "Rover Manual > Fault codes" in sections
+
+
+def test_pdf_same_size_text_has_no_headings(tmp_path):
+    pytest.importorskip("pypdf")
+    path = tmp_path / "flat.pdf"
+    build_pdf(path, [["Just a line.", "Another line."]])
+    doc = load_document(path)
+    assert all(b.kind == "paragraph" for b in doc.blocks)

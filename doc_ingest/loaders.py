@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 from .blocks import Block, Document, markdown_table
 from .html_loader import parse_html
 from .ocr import OcrEngine, page_images
+from .pdf_structure import blocks_from_pages, read_lines
 
 
 class MissingDependency(RuntimeError):
@@ -188,16 +189,25 @@ def load_pdf(path: Path, ocr: OcrEngine | None = None) -> Document:
     blocks: list[Block] = []
     ocr_pages: list[int] = []
     empty_pages: list[int] = []
-    for number, page in enumerate(reader.pages, start=1):
+    pages = list(reader.pages)
+    lines = [read_lines(page) for page in pages]
+    structured = blocks_from_pages(lines)
+    for number, page in enumerate(pages, start=1):
         text = page.extract_text() or ""
         if not text.strip() and ocr is not None:
             text = "\n\n".join(ocr(data, suffix) for data, suffix in page_images(page))
             if text.strip():
                 ocr_pages.append(number)
+            blocks.extend(_paragraphs(text, page=number))
+        elif structured is not None:
+            blocks.extend(structured[number - 1])
+        else:
+            blocks.extend(_paragraphs(text, page=number))
         if not text.strip():
             empty_pages.append(number)
-        blocks.extend(_paragraphs(text, page=number))
     meta_title = getattr(reader.metadata, "title", None) if reader.metadata else None
+    if not meta_title:
+        meta_title = next((b.text for b in blocks if b.kind == "heading" and b.level == 1), None)
     return Document(
         source=str(path), format="pdf", title=meta_title or None, blocks=blocks, ocr_pages=ocr_pages, empty_pages=empty_pages
     )
