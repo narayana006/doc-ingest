@@ -160,3 +160,70 @@ def test_pdf_same_size_text_has_no_headings(tmp_path):
     build_pdf(path, [["Just a line.", "Another line."]])
     doc = load_document(path)
     assert all(b.kind == "paragraph" for b in doc.blocks)
+
+
+def _table_pdf(tmp_path):
+    path = tmp_path / "t.pdf"
+    build_pdf(
+        path,
+        [
+            [
+                ("Fault codes", 16),
+                "Codes are shown on the display.",
+                ["Code", "Meaning", "Action"],
+                ["E12", "Motor hot", "Wait ten minutes"],
+                ["E27", "Lidar blocked", "Clean the dome"],
+                "Report any other code to support.",
+            ]
+        ],
+    )
+    return path
+
+
+def test_pdf_table_detected_as_markdown(tmp_path):
+    pytest.importorskip("pypdf")
+    doc = load_document(_table_pdf(tmp_path))
+    assert [(b.kind, b.page) for b in doc.blocks] == [
+        ("heading", 1),
+        ("paragraph", 1),
+        ("table", 1),
+        ("paragraph", 1),
+    ]
+    assert doc.blocks[2].text == (
+        "| Code | Meaning | Action |\n"
+        "| --- | --- | --- |\n"
+        "| E12 | Motor hot | Wait ten minutes |\n"
+        "| E27 | Lidar blocked | Clean the dome |"
+    )
+    assert doc.blocks[3].text == "Report any other code to support."
+
+
+def test_pdf_table_survives_chunking_with_section(tmp_path):
+    pytest.importorskip("pypdf")
+    chunks = chunk_document(load_document(_table_pdf(tmp_path)), chunk_size=800)
+    assert any("| E27 | Lidar blocked | Clean the dome |" in c.text and c.section == "Fault codes" for c in chunks)
+
+
+def test_pdf_table_without_any_headings(tmp_path):
+    pytest.importorskip("pypdf")
+    path = tmp_path / "nohead.pdf"
+    build_pdf(path, [["Intro line.", ["Name", "Qty"], ["Bolt", "4"]]])
+    doc = load_document(path)
+    assert [b.kind for b in doc.blocks] == ["paragraph", "table"]
+    assert doc.blocks[1].text.splitlines()[2] == "| Bolt | 4 |"
+
+
+def test_pdf_single_spread_row_is_not_a_table(tmp_path):
+    pytest.importorskip("pypdf")
+    path = tmp_path / "one.pdf"
+    build_pdf(path, [["A line.", ["left", "right"], "Another line."]])
+    doc = load_document(path)
+    assert all(b.kind == "paragraph" for b in doc.blocks)
+
+
+def test_pdf_rows_with_different_column_counts_are_not_a_table(tmp_path):
+    pytest.importorskip("pypdf")
+    path = tmp_path / "ragged.pdf"
+    build_pdf(path, [[["a", "b"], ["c", "d", "e"]]])
+    doc = load_document(path)
+    assert all(b.kind == "paragraph" for b in doc.blocks)

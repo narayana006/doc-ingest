@@ -13,11 +13,14 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
-from .blocks import Block
+from .blocks import Block, markdown_table
 
 MIN_RATIO = 1.15  # a heading is at least this much larger than body text
 MAX_HEADING_CHARS = 120
 MAX_LEVELS = 6
+ROW_TOLERANCE = 0.5  # fragments whose baselines differ by less than this many font sizes share a row
+COLUMN_TOLERANCE = 8.0  # points; left edges of a column may drift this much between rows
+MAX_ROW_GAP = 2.5  # a table row is at most this many font sizes below the previous one
 
 
 @dataclass
@@ -25,6 +28,7 @@ class Line:
     text: str
     size: float
     y: float
+    x: float = 0.0
 
 
 def read_lines(page) -> list[Line]:
@@ -36,7 +40,8 @@ def read_lines(page) -> list[Line]:
         if not clean:
             return
         scale = math.hypot(tm[2], tm[3]) * math.hypot(cm[2], cm[3])
-        lines.append(Line(clean, round((font_size or 0) * scale, 1), tm[5] * cm[3] + cm[5]))
+        x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+        lines.append(Line(clean, round((font_size or 0) * scale, 1), tm[5] * cm[3] + cm[5], x))
 
     page.extract_text(visitor_text=visit)
     return lines
@@ -59,21 +64,72 @@ def _is_heading(line: Line, body: float) -> bool:
     )
 
 
+def _rows(lines: list[Line], body: float) -> list[list[Line]]:
+    """Group text fragments that sit on one baseline, left to right, into rows."""
+    rows: list[list[Line]] = []
+    for line in lines:
+        row = rows[-1] if rows else None
+        if (
+            row
+            and not _is_heading(line, body)
+            and not _is_heading(row[-1], body)
+            and abs(row[-1].y - line.y) <= ROW_TOLERANCE * max(line.size, 1)
+            and line.x > row[-1].x
+        ):
+            row.append(line)
+        else:
+            rows.append([line])
+    return rows
+
+
+def _same_columns(a: list[Line], b: list[Line]) -> bool:
+    return len(a) == len(b) and all(abs(p.x - q.x) <= COLUMN_TOLERANCE for p, q in zip(a, b))
+
+
+def group_tables(lines: list[Line], body: float) -> list[Line | list[list[Line]]]:
+    """Split a page into plain lines and tables.
+
+    A table is two or more consecutive rows that each hold two or more text
+    fragments, with the same number of fragments and left edges that line up
+    column by column. Anything else stays a plain line.
+    """
+    items: list[Line | list[list[Line]]] = []
+    rows = _rows(lines, body)
+    i = 0
+    while i < len(rows):
+        j = i + 1
+        if len(rows[i]) >= 2:
+            while (
+                j < len(rows)
+                and _same_columns(rows[i], rows[j])
+                and rows[j - 1][0].y - rows[j][0].y <= MAX_ROW_GAP * max(rows[j][0].size, 1)
+            ):
+                j += 1
+        if j - i >= 2:
+            items.append(rows[i:j])
+        else:
+            items.extend(rows[i])
+            j = i + 1
+        i = j
+    return items
+
+
 def blocks_from_pages(pages: list[list[Line]]) -> list[list[Block]] | None:
     """Turn lines into heading and paragraph blocks, one list per page.
 
-    Returns None when no line stands out, so the caller can fall back to
-    plain text extraction.
+    Returns None when there is no heading and no table, so the caller can
+    fall back to plain text extraction.
     """
     body = body_size(pages)
     if body is None:
         return None
     sizes = sorted({l.size for lines in pages for l in lines if _is_heading(l, body)}, reverse=True)
-    if not sizes:
+    grouped = [group_tables(lines, body) for lines in pages]
+    if not sizes and not any(isinstance(item, list) for items in grouped for item in items):
         return None
     level_of = {size: min(rank, MAX_LEVELS) for rank, size in enumerate(sizes, start=1)}
     result: list[list[Block]] = []
-    for number, lines in enumerate(pages, start=1):
+    for number, items in enumerate(grouped, start=1):
         blocks: list[Block] = []
         para: list[str] = []
         last: Line | None = None
@@ -83,7 +139,13 @@ def blocks_from_pages(pages: list[list[Line]]) -> list[list[Block]] | None:
                 blocks.append(Block("paragraph", " ".join(para), page=number))
                 para.clear()
 
-        for line in lines:
+        for item in items:
+            if isinstance(item, list):
+                flush()
+                blocks.append(Block("table", markdown_table([[cell.text for cell in row] for row in item]), page=number))
+                last = item[-1][-1]
+                continue
+            line = item
             if line.size in level_of and _is_heading(line, body):
                 flush()
                 previous = blocks[-1] if blocks else None

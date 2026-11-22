@@ -66,7 +66,8 @@ def build_docx(path: Path, items: list[tuple], title: str | None = None) -> None
 def build_pdf(path: Path, pages: list[list[str] | list[tuple[str, int]]]) -> None:
     """Write a minimal text PDF: one list of lines per page, Helvetica.
 
-    A line is a string (12pt) or a ``(text, size)`` pair.
+    A line is a string (12pt), a ``(text, size)`` pair, or a list of strings
+    that are placed side by side as table cells (12pt, 150pt apart).
     """
     objects: list[bytes] = []
     n_pages = len(pages)
@@ -75,12 +76,17 @@ def build_pdf(path: Path, pages: list[list[str] | list[tuple[str, int]]]) -> Non
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     for i, lines in enumerate(pages):
-        ops = ["BT", "72 720 Td", "16 TL"]
-        for line in lines:
-            line, size = line if isinstance(line, tuple) else (line, 12)
-            ops.append(f"/F1 {size} Tf")
-            safe = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-            ops.append(f"({safe}) Tj T*")
+        ops = ["BT"]
+        for row, line in enumerate(lines):
+            y = 720 - 16 * row
+            if isinstance(line, list):
+                cells = [(cell, 12, 72 + 150 * col) for col, cell in enumerate(line)]
+            else:
+                text, size = line if isinstance(line, tuple) else (line, 12)
+                cells = [(text, size, 72)]
+            for text, size, x in cells:
+                safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+                ops.append(f"/F1 {size} Tf 1 0 0 1 {x} {y} Tm ({safe}) Tj")
         ops.append("ET")
         stream = "\n".join(ops).encode("latin-1")
         objects.append(

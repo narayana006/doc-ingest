@@ -2,7 +2,7 @@
 
 One command from a folder of text, Markdown, HTML, DOCX and PDF files to clean, section-aware chunks in JSONL, each tagged with the file, heading path and page it came from.
 
-**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra, and `--ocr` reads scanned PDF pages through the `tesseract` program. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. PDF headings are detected from font size. Not built yet: table detection inside PDFs, and exporters that write straight to a vector store.
+**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra, and `--ocr` reads scanned PDF pages through the `tesseract` program. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. PDF headings are detected from font size and PDF tables laid out in aligned columns are kept as Markdown. Not built yet: ruled or merged-cell PDF tables, and exporters that write straight to a vector store.
 
 ## Install
 
@@ -90,7 +90,7 @@ PDF pages that yield no text are listed on stderr (`no text found on pages of: s
 | Markdown | `.md`, `.markdown` | nothing | `#` and underlined | pipe tables kept as written | no |
 | HTML | `.html`, `.htm` | nothing | `h1` to `h6` | converted to Markdown | no |
 | Word | `.docx` | nothing | Heading 1 to 6 and Title styles | converted to Markdown | no |
-| PDF | `.pdf` | `pypdf` extra (`tesseract` for `--ocr`) | by font size | no | yes |
+| PDF | `.pdf` | `pypdf` extra (`tesseract` for `--ocr`) | by font size | aligned columns, converted to Markdown | yes |
 
 HTML extraction drops `script`, `style`, `nav`, `footer`, `aside`, `form` and similar page chrome. Markdown front matter is removed and its `title` is used. Fenced code and `<pre>` blocks are kept intact as fenced code.
 
@@ -105,6 +105,22 @@ Rover Manual > Fault codes | page 2
 ```
 
 If the PDF has no metadata title, the first level-1 heading is used as `title`.
+
+### PDF tables
+
+PDF text is placed on the page piece by piece, so a table is found from geometry: two or more consecutive rows, each with two or more text pieces on one baseline, the same number of pieces per row, and left edges that line up column by column (within 8 points) with no big vertical gap. The first row becomes the header. Such a block becomes a `table` block, so it is kept whole (or split by row with the header repeated) when chunking:
+
+```text
+Fault codes (section)
+Codes are shown on the display.
+
+| Code | Meaning | Action |
+| --- | --- | --- |
+| E12 | Motor hot | Wait ten minutes |
+| E27 | Lidar blocked | Clean the dome |
+```
+
+This works when the PDF writes each cell as its own text piece, which is how most generated PDFs (word processors, reports, exports) do it. It does not look at ruling lines, so tables with merged cells, cells that wrap over several lines, or columns that start at drifting positions are not recognised and come out as ordinary paragraphs.
 
 ### Scanned PDFs (OCR)
 
@@ -185,13 +201,13 @@ Larkspur Field Handbook > Resetting the controller | 157
 - [x] JSONL export
 - [x] OCR fallback for scanned PDF pages (`--ocr`, uses the `tesseract` program)
 - [x] Heading detection in PDFs (by font size)
-- [ ] Table detection in PDFs
+- [x] Table detection in PDFs (aligned columns)
 - [ ] Exporters for common vector stores
 - [ ] Chunk overlap and token-based (rather than character-based) sizes
 
 ## Limitations
 
-- Scanned PDFs produce no text unless you pass `--ocr` and have `tesseract` installed; OCR only covers the image encodings listed above, and OCR output is not marked as such per chunk (the summary counts OCRed pages). Images embedded in DOCX and HTML are not OCRed. PDF text comes out in the order `pypdf` reports it, with no tables, so multi-column layouts may interleave. PDF headings are guessed: a short line (up to 120 characters, not ending in `.`, `,` or `;`) set at least 15% larger than the most common font size counts as a heading, with levels ranked by size. Bold-only headings at body size are missed, and a PDF whose text is all one size gets no headings. Scanned pages read through OCR carry no heading information.
+- Scanned PDFs produce no text unless you pass `--ocr` and have `tesseract` installed; OCR only covers the image encodings listed above, and OCR output is not marked as such per chunk (the summary counts OCRed pages). Images embedded in DOCX and HTML are not OCRed. PDF text comes out in the order `pypdf` reports it, so multi-column page layouts may interleave and tables are only found when their columns align (see above). PDF headings are guessed: a short line (up to 120 characters, not ending in `.`, `,` or `;`) set at least 15% larger than the most common font size counts as a heading, with levels ranked by size. Bold-only headings at body size are missed, and a PDF whose text is all one size gets no headings. Scanned pages read through OCR carry no heading information.
 - Chunk size is counted in characters, not model tokens, and there is no overlap between chunks.
 - DOCX reading covers the main document body: headings, paragraphs, numbered or bulleted paragraphs and top-level tables. Headers, footers, footnotes, text boxes, images and tracked-change markup are ignored, and merged table cells are flattened.
 - HTML is read as static markup; anything a page renders with JavaScript is not there. Nested tables are flattened into the outer table.
