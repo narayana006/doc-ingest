@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 from . import __version__
 from .chunker import chunk_document
+from .exporters import FORMATS, export_records
 from .loaders import SUPPORTED_SUFFIXES, MissingDependency, load_document
 from .ocr import OcrUnavailable, TesseractOcr
 
@@ -20,7 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Extract text from .txt, .md, .html, .docx and .pdf files and write section-aware chunks as JSONL.",
     )
     parser.add_argument("paths", nargs="+", help="files or directories (searched recursively)")
-    parser.add_argument("--out", default="-", help="output JSONL file (default: stdout)")
+    parser.add_argument("--out", default="-", help="output file (default: stdout)")
+    parser.add_argument("--format", choices=FORMATS, default="jsonl", help="output format: jsonl (default), chroma (one JSON object for collection.add) or pinecone (JSONL for upsert_records)")
     parser.add_argument("--chunk-size", type=int, default=800, help="maximum characters per chunk (default 800)")
     parser.add_argument("--prepend-section", action="store_true", help="start each chunk's text with its heading path")
     parser.add_argument("--ocr", action="store_true", help="run OCR (tesseract) on PDF pages that have no text layer")
@@ -110,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         per_format[doc.format] += 1
         records.extend(chunk.to_dict() for chunk in chunks)
 
-    text = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+    text = export_records(records, args.format)
     if args.out == "-":
         sys.stdout.write(text)
     else:

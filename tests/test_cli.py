@@ -77,3 +77,33 @@ def test_pdf_chunks_carry_page_numbers(tmp_path):
     out = tmp_path / "o.jsonl"
     assert main([str(tmp_path), "--out", str(out), "--chunk-size", "20", "--quiet"]) == 0
     assert [(r["page"], r["text"]) for r in read(out)] == [(1, "First page text."), (2, "Second page text.")]
+
+
+def test_chroma_format_matches_collection_add(tmp_path):
+    (tmp_path / "a.md").write_text("# Title\n\nbody text here")
+    out = tmp_path / "c.json"
+    assert main([str(tmp_path / "a.md"), "--out", str(out), "--format", "chroma", "--quiet"]) == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert set(payload) == {"ids", "documents", "metadatas"}
+    assert len(payload["ids"]) == len(payload["documents"]) == len(payload["metadatas"]) == 1
+    assert payload["documents"][0].endswith("body text here")
+    meta = payload["metadatas"][0]
+    assert meta["source"] == "a.md" and meta["section"] == "Title"
+    assert "page" not in meta and None not in meta.values()
+
+
+def test_pinecone_format_is_flat_records(tmp_path):
+    (tmp_path / "a.txt").write_text("hello there")
+    out = tmp_path / "p.jsonl"
+    assert main([str(tmp_path / "a.txt"), "--out", str(out), "--format", "pinecone", "--quiet"]) == 0
+    (row,) = read(out)
+    assert row["chunk_text"] == "hello there" and len(row["_id"]) == 12
+    assert row["source"] == "a.txt" and "id" not in row and "text" not in row
+    assert None not in row.values()
+
+
+def test_unknown_format_is_rejected(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path / "a.txt"), "--format", "parquet"])
+    assert exc.value.code == 2

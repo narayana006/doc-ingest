@@ -2,7 +2,7 @@
 
 One command from a folder of text, Markdown, HTML, DOCX and PDF files to clean, section-aware chunks in JSONL, each tagged with the file, heading path and page it came from.
 
-**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra, and `--ocr` reads scanned PDF pages through the `tesseract` program. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. PDF headings are detected from font size and PDF tables laid out in aligned columns are kept as Markdown. Not built yet: ruled or merged-cell PDF tables, and exporters that write straight to a vector store.
+**Status: first working version (0.1.0).** Text, Markdown, HTML and DOCX work with no dependencies; PDF text extraction works with the optional `pypdf` extra, and `--ocr` reads scanned PDF pages through the `tesseract` program. Tables are kept as Markdown, chunks follow heading boundaries, and output is JSONL. PDF headings are detected from font size and PDF tables laid out in aligned columns are kept as Markdown. Output can be reshaped for Chroma or Pinecone loading (`--format`). Not built yet: ruled or merged-cell PDF tables, direct uploads to a vector store, and chunk overlap.
 
 ## Install
 
@@ -65,13 +65,14 @@ The HTML table in `release-notes.html` comes out as Markdown too, under the sect
 ## Usage
 
 ```text
-doc-ingest PATH [PATH ...] [--out FILE] [--chunk-size N] [--prepend-section] [--ocr] [--ocr-lang LANG] [--quiet]
+doc-ingest PATH [PATH ...] [--out FILE] [--format FORMAT] [--chunk-size N] [--prepend-section] [--ocr] [--ocr-lang LANG] [--quiet]
 ```
 
 | Option | Default | Effect |
 | --- | --- | --- |
 | `PATH` | | Files or directories. Directories are searched recursively; hidden files and folders are ignored |
-| `--out FILE` | stdout | Where to write JSONL. With stdout, the summary goes to stderr so the output can be piped |
+| `--out FILE` | stdout | Where to write the output. With stdout, the summary goes to stderr so the output can be piped |
+| `--format FORMAT` | `jsonl` | `jsonl`, `chroma` or `pinecone` (see "Loading into a vector store") |
 | `--chunk-size N` | 800 | Maximum characters per chunk |
 | `--prepend-section` | off | Start each chunk's text with its heading path, which helps keyword and embedding search on short chunks |
 | `--ocr` | off | Run OCR on PDF pages that have no text layer (needs `tesseract`, see below) |
@@ -152,6 +153,28 @@ doc = load_document("scanned-checklist.pdf", ocr=TesseractOcr(lang="eng"))
 print(doc.ocr_pages)  # [1, 2]
 ```
 
+### Loading into a vector store
+
+`--format` reshapes the same chunks for a vector store. It only rewrites the file: no embeddings are computed and nothing is uploaded, so the store (or your own code) embeds the text. Metadata fields that are unset (such as `page` outside PDFs) are left out, because these stores reject null values.
+
+| Format | File | Shape |
+| --- | --- | --- |
+| `chroma` | one JSON object | `{"ids": [...], "documents": [...], "metadatas": [...]}`, the arguments of Chroma's `collection.add` |
+| `pinecone` | JSONL | one record per line with `_id`, `chunk_text` and flat metadata, the input of `index.upsert_records` (indexes with integrated embedding) |
+
+```bash
+doc-ingest examples/corpus --out chunks.json --format chroma --chunk-size 400
+```
+
+```python
+import json, chromadb
+
+collection = chromadb.Client().create_collection("rover-docs")
+collection.add(**json.load(open("chunks.json")))
+```
+
+The Python snippet needs `pip install chromadb` and has not been run as part of this project's tests; the tests check the file shape. Pinecone's batch size limits apply when you upload, so send the records in batches.
+
 ### How chunking works
 
 1. A heading always starts a new chunk. The chunk's `section` is the full heading path, such as `Larkspur Field Handbook > Daily checks > Battery`.
@@ -202,12 +225,13 @@ Larkspur Field Handbook > Resetting the controller | 157
 - [x] OCR fallback for scanned PDF pages (`--ocr`, uses the `tesseract` program)
 - [x] Heading detection in PDFs (by font size)
 - [x] Table detection in PDFs (aligned columns)
-- [ ] Exporters for common vector stores
+- [x] Exporters for common vector stores (`--format chroma` and `--format pinecone` write load-ready files; no direct upload)
 - [ ] Chunk overlap and token-based (rather than character-based) sizes
 
 ## Limitations
 
 - Scanned PDFs produce no text unless you pass `--ocr` and have `tesseract` installed; OCR only covers the image encodings listed above, and OCR output is not marked as such per chunk (the summary counts OCRed pages). Images embedded in DOCX and HTML are not OCRed. PDF text comes out in the order `pypdf` reports it, so multi-column page layouts may interleave and tables are only found when their columns align (see above). PDF headings are guessed: a short line (up to 120 characters, not ending in `.`, `,` or `;`) set at least 15% larger than the most common font size counts as a heading, with levels ranked by size. Bold-only headings at body size are missed, and a PDF whose text is all one size gets no headings. Scanned pages read through OCR carry no heading information.
+- The exporters write files only and were checked against the documented record shapes, not against live Chroma or Pinecone instances.
 - Chunk size is counted in characters, not model tokens, and there is no overlap between chunks.
 - DOCX reading covers the main document body: headings, paragraphs, numbered or bulleted paragraphs and top-level tables. Headers, footers, footnotes, text boxes, images and tracked-change markup are ignored, and merged table cells are flattened.
 - HTML is read as static markup; anything a page renders with JavaScript is not there. Nested tables are flattened into the outer table.
